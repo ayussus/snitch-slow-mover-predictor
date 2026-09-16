@@ -1,50 +1,95 @@
-# Snitch Slow-Mover Prediction Model
+# 👕 Snitch Slow-Mover Prediction Model
 
-Predicts slow-mover risk for a planned SKU **before it has any sales history** —
-using only design attributes (fabric, design, fit, category, price bucket,
-sleeve type, size availability). Built for Snitch's merchandising/planning
-team to catch overstock risk at the buy stage instead of 60–90 days after
-launch.
+**Live app:** https://snitch-slow-mover-predictor.streamlit.app/
 
-**Live app:** _add your Streamlit Cloud URL here after deploying_
+A tool that predicts whether a **planned SKU will become a slow-mover — before it's even manufactured or stocked.** Built for Snitch's merchandising/planning team to catch overstock risk at the buying stage instead of finding out 60–90 days after launch.
 
-## What's in this repo
+---
+
+## The problem this solves
+
+Normally, a brand only learns a SKU is a "slow-mover" (low sales, high stock) months after it's already been bought, printed, and shipped to warehouses — by which point the money is already spent and markdowns are the only option left.
+
+This model flips that around: give it a **planned SKU's attributes** (fabric, fit, design, category, price point, etc.) — attributes you know *before* placing a manufacturing order — and it tells you how risky that SKU profile has historically been, based on patterns learned from past SKU performance.
+
+---
+
+## How it works, in plain terms
+
+1. **We start with SKU-level data**: for every past SKU, we know its attributes (Category, Fabric, Design, Fit, price bucket, etc.) and its sales/stock numbers (units sold, stock on hand).
+
+2. **We compute two performance metrics for every SKU:**
+   - **STR-90** (Sell-Through Rate, 90 days) — what % of stock actually sold
+   - **DOI** (Days of Inventory) — how many days the current stock would last at the recent sales pace
+
+3. **A SKU is labeled "Slow-Mover" if:**
+   `STR-90 is below the median` **AND** `DOI is above 120 days`
+   (i.e., it sold worse than average AND is carrying a large stock overhang)
+
+4. **The model is trained to predict this label using ONLY the attributes** — never the sales/stock numbers themselves. This is on purpose: if the model saw sales numbers, it would just be reading the answer off the label instead of learning anything useful. Attributes are the only thing you actually know *before* a SKU launches, so that's the only thing the model is allowed to use.
+
+5. **Output:** for any new/planned SKU, the model gives a probability (0–100%) that it will become a slow-mover, plus the specific attribute combination driving that risk.
+
+---
+
+## The 4 risk patterns the model learned
+
+These aren't random correlations — each mirrors a real, explainable apparel-inventory risk cause, and the dataset was deliberately built with these patterns so the model has real signal to learn from:
+
+| Pattern | Why it's risky | Learned risk multiplier |
+|---|---|---|
+| **Printed + Polyester** | Cheap synthetic print combo — the look fatigues fast in a fast-fashion cycle | ~99x more likely to be a slow-mover |
+| **Fleece + ₹1,300+ price** | Heavyweight fabric has a short wear-window in a mostly-tropical market; a premium price on top narrows the buyer pool further | ~30x |
+| **Linen + Shirts** | Formal/niche aesthetic that doesn't fit a Gen-Z fast-fashion casual audience | ~23x |
+| **Oversized fit + Jackets/Sweaters** | Oversized fits work in tees/hoodies but not outerwear, where fit misjudgment leaves fringe-size overstock | ~12x |
+
+The model also picks up **weaker, unofficial signals** for combinations it was never explicitly told about — e.g. Fleece + Shorts (a thermally mismatched pairing) scores meaningfully above baseline even without a dedicated rule for it, just from combining what it separately learned about each attribute. This is a good sign: it means the model generalizes a little beyond exactly what it was shown, though not as confidently as the 4 patterns it was explicitly trained on.
+
+---
+
+## Why the data isn't perfectly clean (and why that's intentional)
+
+Real retail data is messy — incomplete tags, inconsistent spelling across teams, sync lags, one-off sales spikes. The training dataset deliberately includes ~15-20% of rows with realistic data-quality issues (see the `Data_Quality_Notes` sheet inside the Excel file for the full list and rates), and the pipeline cleans them the way a real system would: standardizing spelling, imputing missing tags as "Unknown," deduplicating synced records, clipping impossible negative stock, and capping one-off sales spikes. This makes the model more robust to the kind of messiness it'll actually see on live data, rather than only ever working on a pristine sample.
+
+---
+
+## Why Logistic Regression (not XGBoost)
+
+Both were tested side-by-side. Logistic Regression was chosen for the deployed app because:
+- Accuracy was comparable to a shallow XGBoost model (XGBoost edges ahead by a few points on clean data, roughly tied on messy/realistic data)
+- Its output is **directly explainable to a non-technical planning team** — "Fleece priced above ₹1,300 is ~30x more likely to be a slow-mover" is a sentence someone can act on, versus a tree-model importance score that needs extra tooling (like SHAP) to explain properly
+
+---
+
+## Repo structure
 
 ```
 snitch-slow-mover-predictor/
 ├── app.py                  # Streamlit app (3 tabs: findings, single-SKU scorer, bulk scorer)
 ├── requirements.txt
 ├── data/
-│   └── snitch_slow_mover_dataset.xlsx   # synthetic training dataset + README/Data_Quality_Notes sheets
+│   └── snitch_slow_mover_dataset.xlsx   # training dataset + README/Data_Quality_Notes sheets
 ├── src/
 │   ├── features.py          # data cleaning, feature engineering, target label derivation
 │   └── model.py              # pipeline builder, training, feature-importance explanation
 └── README.md
 ```
 
-## How the model works
+The model is **trained fresh every time the app starts** (and cached) rather than shipped as a pickled file — avoids version-mismatch issues between environments and keeps the repo free of binary model files.
 
-1. **Target label** is derived (not stored in the raw data): a SKU is a
-   `Slow_Mover` if `STR_90 < median(STR_90)` AND `DOI > 120`.
-2. **Model features are attributes only** — Category, Fabric, Design, Fit,
-   ASP_Bucket, Sleeve_Type, Size_Availability — never the raw sales/stock
-   numbers, since those directly define the label (using them would leak
-   the answer into the input).
-3. Four attribute combinations are the strongest learned risk signals:
-   - Printed + Polyester
-   - Fleece fabric + ₹1,300+ price
-   - Linen + Shirts
-   - Oversized fit + Jackets/Sweaters
-4. Model: **Logistic Regression** (`class_weight="balanced"`, one-hot
-   encoded categoricals). Chosen over a shallow XGBoost comparison because
-   accuracy was comparable and logistic regression's coefficients are
-   directly explainable to a non-technical planning team ("Fleece priced
-   above ₹1,300 is ~30x more likely to be a slow-mover").
+---
 
-The model is **trained fresh each time the app starts** (and cached with
-`st.cache_resource`) rather than shipped as a pickled file — this avoids
-scikit-learn version-mismatch issues between your training environment and
-Streamlit Cloud's, and keeps the repo free of binary model files.
+## Using the app
+
+Open **https://snitch-slow-mover-predictor.streamlit.app/** — no login or setup needed.
+
+- **🏠 Key Findings** — model accuracy at a glance, the 4 risk patterns explained, and a category-level risk chart
+- **🔍 Score a Single SKU** — pick attributes for one planned SKU → get a risk %, the specific reasons, and a suggested buying action
+- **📦 Bulk Portfolio Scoring** — upload an Excel of an upcoming collection's planned SKUs (template provided in-app) → every SKU scored, risk breakdown by category, downloadable results
+
+Required columns for bulk upload: `Category, Fabric, Design, Fit, ASP_Bucket, Sleeve_Type, Size_Availability` (one row per planned SKU — no sales data needed, since these are pre-launch SKUs).
+
+---
 
 ## Running locally
 
@@ -57,28 +102,19 @@ pip install -r requirements.txt
 streamlit run app.py
 ```
 
-The app opens at `http://localhost:8501`.
+Opens at `http://localhost:8501`.
 
-## Deploying for free (Streamlit Community Cloud)
+## Deploying (free — no paid plan needed)
 
-No paid plan needed — Streamlit Community Cloud is free for public GitHub repos.
+1. Push this repo to a **public** GitHub repository
+2. Go to [share.streamlit.io](https://share.streamlit.io) → sign in with GitHub
+3. **New app** → select this repo → branch `main` → main file `app.py` → **Deploy**
+4. Live in ~2-3 minutes; every push to `main` auto-redeploys
 
-1. Push this repo to a **public** GitHub repository.
-2. Go to [share.streamlit.io](https://share.streamlit.io) and sign in with GitHub.
-3. Click **"New app"** → select this repo → branch `main` → main file path `app.py`.
-4. Click **Deploy**. Build takes ~2–3 minutes.
-5. Every push to `main` auto-redeploys the app.
+---
 
-## Using the app
+## Limitations to keep in mind
 
-- **Key Findings tab** — model accuracy metrics and the 4 risk patterns, in plain language.
-- **Score a Single SKU tab** — pick attributes for one planned SKU, get a risk score + reasons + suggested action.
-- **Bulk Portfolio Scoring tab** — upload an Excel of an upcoming collection's planned SKUs (template provided), get every SKU scored, a risk breakdown, and a downloadable results file.
-
-## Data note
-
-`data/snitch_slow_mover_dataset.xlsx` is **synthetic data** engineered to
-mirror realistic Snitch SKU-level patterns (see the `README` and
-`Data_Quality_Notes` sheets inside the workbook for the full data dictionary,
-the deliberate risk signals, and the real-world data-quality issues modeled
-in). It is not live Snitch sales data.
+- **Synthetic data**: trained on data engineered to mirror realistic Snitch-style patterns, not live sales data. Once real historical data is available, retrain on that for production use.
+- **Only 4 explicit risk rules**: the model catches other risky combinations only weakly (through general attribute correlation, not a dedicated rule). If a new pattern shows up consistently in real data, it should be added as an explicit interaction flag (same pattern as the existing 4 in `src/features.py`) and the model retrained.
+- **Not a sales forecast**: this predicts *risk category*, not exact units sold or exact timing.
