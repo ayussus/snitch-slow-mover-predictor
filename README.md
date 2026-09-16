@@ -91,28 +91,6 @@ Required columns for bulk upload: `Category, Fabric, Design, Fit, ASP_Bucket, Sl
 
 ---
 
-## Running locally
-
-```bash
-git clone https://github.com/<your-username>/snitch-slow-mover-predictor.git
-cd snitch-slow-mover-predictor
-python -m venv venv
-source venv/bin/activate        # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-streamlit run app.py
-```
-
-Opens at `http://localhost:8501`.
-
-## Deploying (free — no paid plan needed)
-
-1. Push this repo to a **public** GitHub repository
-2. Go to [share.streamlit.io](https://share.streamlit.io) → sign in with GitHub
-3. **New app** → select this repo → branch `main` → main file `app.py` → **Deploy**
-4. Live in ~2-3 minutes; every push to `main` auto-redeploys
-
----
-
 ## Limitations to keep in mind
 
 - **Synthetic data**: trained on data engineered to mirror realistic Snitch-style patterns, not live sales data. Once real historical data is available, retrain on that for production use.
